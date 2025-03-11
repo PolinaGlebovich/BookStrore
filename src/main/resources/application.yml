@@ -1,0 +1,46 @@
+spring:
+  kafka:
+    consumer:
+      key-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      properties:
+        spring:
+          json:
+            trusted:
+              packages: 'com.example.market.kafka'
+        ErrorHandlingDeserializer:
+          key:
+            deserializer: org.apache.kafka.common.serialization.StringDeserializer
+          value:
+            deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+    topic:
+      save-image: save-image-event
+      download-image: download-image-event
+      viewAll-image: viewAll-image-event
+      delete-image: delete-image-event
+  datasource:
+    url: jdbc:postgresql://postgres-service:5432/postgres
+    username: root
+    password: root
+    driver-class-name: org.postgresql.Driver
+  servlet:
+    multipart:
+      enabled: true
+      file-size-threshold: 2KB
+      max-file-size: 100MB
+      max-request-size: 100MB
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+  h2:
+    console:
+      enabled: true
+      path: /db
+jwt:
+  token:
+    secret: test
+    expired: 3600000
+
+logging:
+  file:
+    name: logging.txt
