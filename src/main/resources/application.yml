@@ -1,25 +1,13 @@
 spring:
   kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:29092}
     consumer:
-      key-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
-      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
       properties:
-        spring:
-          json:
-            trusted:
-              packages: 'com.example.market.kafka'
-        ErrorHandlingDeserializer:
-          key:
-            deserializer: org.apache.kafka.common.serialization.StringDeserializer
-          value:
-            deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
-    topic:
-      save-image: save-image-event
-      download-image: download-image-event
-      viewAll-image: viewAll-image-event
-      delete-image: delete-image-event
+        spring.json.value.default.type: com.yourpackage.ImageEvent
+        spring.json.trusted.packages: "*"
   datasource:
-    url: jdbc:postgresql://postgres-service:5432/postgres
+    url: jdbc:postgresql://localhost:5432/postgres
     username: root
     password: root
     driver-class-name: org.postgresql.Driver
@@ -31,16 +19,39 @@ spring:
       max-request-size: 100MB
   jpa:
     hibernate:
-      ddl-auto: create-drop
+      ddl-auto: update
   h2:
     console:
       enabled: true
       path: /db
-jwt:
-  token:
-    secret: test
-    expired: 3600000
+  flyway:
+    enabled: false
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+token:
+  signing:
+    key: 8Zz5tw0Ionm3XPZZfN0NOml3z9FMfmpgXwovR9fp6ryDIoGRM8EPHAB6iHsc0fb
 
 logging:
   file:
     name: logging.txt
+  level:
+    root: INFO
+    org.springframework: INFO
+    com.example.market: DEBUG
+
+resilience4j:
+  circuit breaker:
+    instances:
+      imageService:
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 5s
+service:
+  image:
+    upload:
+      url: http://localhost:8081/api/images/upload

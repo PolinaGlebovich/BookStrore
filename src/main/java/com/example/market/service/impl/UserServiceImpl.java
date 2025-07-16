@@ -1,78 +1,122 @@
 package com.example.market.service.impl;
 
+import com.example.market.dto.request.UserRequest;
+import com.example.market.dto.response.UserResponse;
 import com.example.market.entity.Cart;
-import com.example.market.entity.Role;
 import com.example.market.entity.User;
+import com.example.market.exception.UserAlreadyExistsException;
 import com.example.market.exception.UserNotFoundException;
+import com.example.market.mapper.UserMapper;
 import com.example.market.repository.UserRepository;
 import com.example.market.service.UserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
-import org.springframework.security.core.userdetails.UserDetails;
-import org.springframework.security.core.userdetails.UserDetailsService;
-import org.springframework.security.core.userdetails.UsernameNotFoundException;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.cache.annotation.CacheConfig;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.CachePut;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.context.MessageSource;
+import org.springframework.context.i18n.LocaleContextHolder;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
-import java.util.List;
 import java.util.Optional;
-import java.util.Set;
-import java.util.stream.Collectors;
 
-@RequiredArgsConstructor
-@Slf4j
+
 @Service
-public class UserServiceImpl implements UserDetailsService, UserService {
+@Slf4j
+@CacheConfig(cacheNames = "userCache")
+@RequiredArgsConstructor
+public class UserServiceImpl implements UserService {
 
     private final UserRepository userRepository;
+    private final UserMapper userMapper;
+    private final PasswordEncoder passwordEncoder;
+    private final MessageSource messageSource;
 
-    public User findUserById(Long id) {
-        return userRepository.findUserById(id).orElseThrow();
-    }
-
-    public List<User> findAll() {
-        return userRepository.findAll();
-    }
-
-    public User save(User user) {
-        user.setPassword(new BCryptPasswordEncoder().encode(user.getPassword()));
+    @Override
+    @Transactional
+    public UserResponse save(User user) {
+        if (userRepository.existsByUsername(user.getUsername())) {
+            throw new UserAlreadyExistsException(
+                    messageSource.getMessage("user.already_exists", null, LocaleContextHolder.getLocale()));
+        }
 
         Cart cart = new Cart();
         cart.setUser(user);
         user.setCart(cart);
-        user.setRole(Set.of(Role.ADMIN));
         userRepository.save(user);
-        log.info("Save new user {} with cart {}", user, cart);
-
-        return user;
+        log.info(messageSource.getMessage("user.saved", null, LocaleContextHolder.getLocale()));
+        return userMapper.toDto(user);
     }
 
     @Override
-    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
-        Optional<User> findByUsername = userRepository.findUserByUsername(username);
-        User user = findByUsername.orElseThrow(UserNotFoundException::new);
-
-        return new CustomUserDetailsImpl(
-                user.getId(),
-                user.getUsername(),
-                user.getPassword(),
-                user.getRole().stream()
-                        .map(role -> new SimpleGrantedAuthority(role.name()))
-                        .collect(Collectors.toList())
-        );
+    @Cacheable(value = "users", key = "#id", unless = "#result == null")
+    public UserResponse findUserById(Long id) {
+        return userRepository.findById(id)
+                .map(userMapper::toDto)
+                .orElseThrow(() -> new UserNotFoundException(
+                        messageSource.getMessage("user.id_not_found", new Object[]{id}, LocaleContextHolder.getLocale())));
     }
 
-    public void delete(Long id) {
-        userRepository.deleteById(id);
-        log.info("Delete user");
+
+    @Override
+    public Optional<User> findByUsername(String username) {
+        return userRepository.findByUsername(username);
     }
 
-    public Long getUserId(String username) {
-        Optional<User> userOptional = userRepository.findUserByUsername(username);
-        if (userOptional.isPresent()) {
-            return userOptional.get().getId();
+    @Override
+    @CachePut(value = "users", key = "#user.id")
+    @Transactional
+    public UserResponse updateUser(Long id, UserRequest userRequest) {
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new UserNotFoundException(
+                        messageSource.getMessage("user.not_found", null, LocaleContextHolder.getLocale())));
+
+        userMapper.updateUserFromRequest(userRequest, user);
+
+        if (userRequest.getPassword() != null && !userRequest.getPassword().isEmpty()) {
+            user.setPassword(passwordEncoder.encode(userRequest.getPassword()));
         }
-        throw new UsernameNotFoundException("User not found with username: " + username);
+
+        if (userRequest.getRoles() != null) {
+            user.setRole(userRequest.getRoles());
+        }
+
+        User updatedUser = userRepository.save(user);
+        log.info(messageSource.getMessage("user.updated", null, LocaleContextHolder.getLocale()));
+        return userMapper.toDto(updatedUser);
+    }
+
+    @Override
+    @CacheEvict(value = "users", key = "#id")
+    @Transactional
+    public void delete(Long id) {
+        if (!userRepository.existsById(id)) {
+            throw new UserNotFoundException(
+                    messageSource.getMessage("user.id_not_found", new Object[]{id}, LocaleContextHolder.getLocale()));
+        }
+        userRepository.deleteById(id);
+        log.info(messageSource.getMessage("user.deleted", null, LocaleContextHolder.getLocale()));
+    }
+
+    @Override
+    public UserResponse getCurrentUser() {
+        var username = SecurityContextHolder.getContext().getAuthentication().getName();
+        return userRepository.findByUsername(username)
+                .map(userMapper::toDto)
+                .orElseThrow(() -> new UserNotFoundException(
+                        messageSource.getMessage("user.username_not_found", new Object[]{username}, LocaleContextHolder.getLocale())));
+    }
+
+    @Override
+    @Cacheable(cacheNames = "users")
+    public Page<UserResponse> findAll(Pageable pageable) {
+        return userRepository.findAll(pageable)
+                .map(userMapper::toDto);
     }
 }
